@@ -7,10 +7,12 @@
 package org.datasyslab.geospark.spatialOperator;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 
+import org.apache.avro.generic.GenericData;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.PairFunction;
@@ -114,8 +116,8 @@ public class JoinQuery implements Serializable{
             JavaPairRDD<Envelope, HashSet<Geometry>> joinResultWithDuplicates = cogroupResult.flatMapToPair(new GeometryByRectangleJudgement());
             
             JavaPairRDD<Envelope, HashSet<Geometry>> joinListResultAfterAggregation = DuplicatesHandler.removeDuplicatesGeometryByRectangle(joinResultWithDuplicates);
-            
-            JavaPairRDD<Envelope, HashSet<Point>> castedResult = joinListResultAfterAggregation.mapValues(new Function<HashSet<Geometry>,HashSet<Point>>()
+
+            return joinListResultAfterAggregation.mapValues(new Function<HashSet<Geometry>, HashSet<Point>>()
             {
 				@Override
 				public HashSet<Point> call(HashSet<Geometry> spatialObjects) throws Exception {
@@ -129,7 +131,6 @@ public class JoinQuery implements Serializable{
 				}
             	
             });
-            return castedResult;
         }
     }
     
@@ -488,6 +489,45 @@ public class JoinQuery implements Serializable{
         }
 
    }
+
+    public static JavaPairRDD<Envelope, HashSet<Point>> SpatialJoinQueryCartesian(PointRDD myPointRDD, RectangleRDD myRectRDD) throws Exception {
+        //org.datasyslab.geospark.spatialRDD.PointRDD convertedRDD = PointRDD(myPointRDD);
+
+        //this error checking is based on code was taken from one of the above functions
+        if (myPointRDD.spatialPartitionedRDD == null) {
+            throw new Exception("[JoinQuery][SpatialJoinQueryCartesian]spatialRDD SpatialPartitionedRDD is null. " +
+                    "Please do spatial partitioning.");
+        } else if (myRectRDD.spatialPartitionedRDD == null) {
+            throw new Exception("[JoinQuery][SpatialJoinQueryCartesian]queryRDD SpatialPartitionedRDD is null. " +
+                    "Please use the spatialRDD's grids to do spatial partitioning.");
+        } else if (myRectRDD.grids.equals(myPointRDD.grids) == false) {
+            throw new Exception("[JoinQuery][SpatialJoinQueryCartesian]queryRDD is not partitioned by the same grids with spatialRDD. " +
+                    "Please make sure they both use the same grids otherwise wrong results will appear.");
+        }
+
+        List<Envelope> rectangle_set = myRectRDD.grids;
+        PointRDD range_result;
+        HashSet<Point> point_result;
+        Tuple2<Envelope, HashSet<Point>> tuple_result;
+        List<Tuple2<Envelope, HashSet<Point>>> result_list = new ArrayList<>();
+
+        for (Envelope this_envelope : rectangle_set) {
+            range_result = new PointRDD(RangeQuery.SpatialRangeQuery(myPointRDD, this_envelope, 0, false));
+
+            // this code adapted from the SpatialRDD code
+            List collectedResult = range_result.rawSpatialRDD.collect();
+            HashSet resultWithoutDuplicates = new HashSet();
+            for (int i = 0; i < collectedResult.size(); i++) {
+                resultWithoutDuplicates.add(new Point(collectedResult.get(i)));
+            }
+
+            point_result = new HashSet<>(range_result.collect());
+
+        }
+
+    }
+
+
 
     /**
      * Spatial join query count by key.
