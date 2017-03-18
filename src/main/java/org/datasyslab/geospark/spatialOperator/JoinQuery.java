@@ -16,6 +16,8 @@ import org.apache.avro.generic.GenericData;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.PairFunction;
+import org.apache.spark.SparkContext;
+import org.apache.spark.api.java.JavaSparkContext;
 import org.datasyslab.geospark.joinJudgement.GeometryByPolygonJudgement;
 import org.datasyslab.geospark.joinJudgement.GeometryByPolygonJudgementUsingIndex;
 import org.datasyslab.geospark.joinJudgement.GeometryByRectangleJudgement;
@@ -490,10 +492,9 @@ public class JoinQuery implements Serializable{
 
    }
 
-    public static JavaPairRDD<Envelope, HashSet<Point>> SpatialJoinQueryCartesian(PointRDD myPointRDD, RectangleRDD myRectRDD) throws Exception {
-        //org.datasyslab.geospark.spatialRDD.PointRDD convertedRDD = PointRDD(myPointRDD);
 
-        //this error checking is based on code was taken from one of the above functions
+    public static JavaPairRDD<Envelope, HashSet<Point>> SpatialJoinQueryCartesian(PointRDD myPointRDD, RectangleRDD myRectRDD) throws Exception {
+        //[this error checking is based on code was taken from one of the above functions]
         if (myPointRDD.spatialPartitionedRDD == null) {
             throw new Exception("[JoinQuery][SpatialJoinQueryCartesian]spatialRDD SpatialPartitionedRDD is null. " +
                     "Please do spatial partitioning.");
@@ -505,28 +506,36 @@ public class JoinQuery implements Serializable{
                     "Please make sure they both use the same grids otherwise wrong results will appear.");
         }
 
-        List<Envelope> rectangle_set = myRectRDD.grids;
-        PointRDD range_result;
-        HashSet<Point> point_result;
-        Tuple2<Envelope, HashSet<Point>> tuple_result;
-        List<Tuple2<Envelope, HashSet<Point>>> result_list = new ArrayList<>();
+        //pull the context from one of our RDDs
+        JavaSparkContext sc = JavaSparkContext.fromSparkContext(myRectRDD.getRawSpatialRDD().context());
 
+        //build up some of the variables we're going to use
+        List<Envelope> rectangle_set = myRectRDD.grids; //used for iterating over the Envelopes
+        PointRDD range_result; //used for storing intermediate results from SpatialRangeQuery
+        HashSet<Point> point_result = new HashSet<>(); //used to remove duplicate results from the previous step
+
+        //used as local storage of the results, prior to being broadcast as an RDD
+        List<Tuple2<Envelope, HashSet<Point>>> to_parallelize = new ArrayList<>();
+
+        //for every envelope in our rectangleRDD...
         for (Envelope this_envelope : rectangle_set) {
+            //do a spatial range query on our points
             range_result = new PointRDD(RangeQuery.SpatialRangeQuery(myPointRDD, this_envelope, 0, false));
 
-            // this code adapted from the SpatialRDD code
+            //[this code adapted from code in SpatialRDD]
+
+            //scrape the results from the query to our local system for transformation
             List collectedResult = range_result.rawSpatialRDD.collect();
-            HashSet resultWithoutDuplicates = new HashSet();
-            for (int i = 0; i < collectedResult.size(); i++) {
-                resultWithoutDuplicates.add(new Point(collectedResult.get(i)));
-            }
+            for (int i = 0; i < collectedResult.size(); i++)
+                point_result.add(Point.class.cast(collectedResult.get(i)));
 
-            point_result = new HashSet<>(range_result.collect());
-
+            //add this envelope's results to our collection of tuples
+            to_parallelize.add(new Tuple2<>(this_envelope, point_result));
         }
 
+        //rebroadcast the list of tuples to the cluster, and return the produced RDD
+        return sc.parallelizePairs(to_parallelize);
     }
-
 
 
     /**
