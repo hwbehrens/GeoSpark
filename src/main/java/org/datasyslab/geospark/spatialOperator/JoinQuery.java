@@ -14,6 +14,7 @@ import java.util.List;
 
 import org.apache.avro.generic.GenericData;
 import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.SparkContext;
@@ -493,7 +494,9 @@ public class JoinQuery implements Serializable{
    }
 
 
-    public static JavaPairRDD<Envelope, HashSet<Point>> SpatialJoinQueryCartesian(PointRDD myPointRDD, RectangleRDD myRectRDD) throws Exception {
+    public static JavaPairRDD<Envelope, HashSet<Point>> SpatialJoinQueryCartesian(PointRDD myPointRDD, RectangleRDD myRectRDD, boolean useIndex) throws Exception {
+        //we intentionally take, yet ignore, the useIndex parameter in order to maintain compatibility with the other functions
+
         //[this error checking is based on code was taken from one of the above functions]
         if (myPointRDD.spatialPartitionedRDD == null) {
             throw new Exception("[JoinQuery][SpatialJoinQueryCartesian]spatialRDD SpatialPartitionedRDD is null. " +
@@ -510,22 +513,23 @@ public class JoinQuery implements Serializable{
         JavaSparkContext sc = JavaSparkContext.fromSparkContext(myRectRDD.getRawSpatialRDD().context());
 
         //build up some of the variables we're going to use
-        List<Envelope> rectangle_set = myRectRDD.grids; //used for iterating over the Envelopes
-        PointRDD range_result; //used for storing intermediate results from SpatialRangeQuery
-        HashSet<Point> point_result = new HashSet<>(); //used to remove duplicate results from the previous step
+        List rectangle_set = myRectRDD.rawSpatialRDD.collect();
+        HashSet<Point> point_result = new HashSet<>(); //used to remove duplicate results
 
         //used as local storage of the results, prior to being broadcast as an RDD
         List<Tuple2<Envelope, HashSet<Point>>> to_parallelize = new ArrayList<>();
 
         //for every envelope in our rectangleRDD...
-        for (Envelope this_envelope : rectangle_set) {
+        for (Object this_object : rectangle_set) {
+            Envelope this_envelope = Envelope.class.cast(this_object);
+
             //do a spatial range query on our points
-            range_result = new PointRDD(RangeQuery.SpatialRangeQuery(myPointRDD, this_envelope, 0, false));
+            JavaRDD range_result = RangeQuery.SpatialRangeQuery(myPointRDD, this_envelope, 0, false);
 
             //[this code adapted from code in SpatialRDD]
 
             //scrape the results from the query to our local system for transformation
-            List collectedResult = range_result.rawSpatialRDD.collect();
+            List collectedResult = range_result.collect(); //list of Points inside Envelope
             for (int i = 0; i < collectedResult.size(); i++)
                 point_result.add(Point.class.cast(collectedResult.get(i)));
 
