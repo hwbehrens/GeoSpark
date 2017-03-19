@@ -6,6 +6,7 @@
  */
 package org.datasyslab.geospark.spatialOperator;
 
+import java.io.File;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -13,6 +14,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import org.apache.avro.generic.GenericData;
+import org.apache.commons.io.FileUtils;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.Function;
@@ -509,6 +511,10 @@ public class JoinQuery implements Serializable{
                     "Please make sure they both use the same grids otherwise wrong results will appear.");
         }
 
+        //used for debugging, if needed
+        //final File file = new File("/usr/lib/spark/rawlog.txt");
+        //FileUtils.writeStringToFile(file, "after error checking\n", "UTF-8");
+
         //pull the context from one of our RDDs
         JavaSparkContext sc = JavaSparkContext.fromSparkContext(myRectRDD.getRawSpatialRDD().context());
 
@@ -519,8 +525,13 @@ public class JoinQuery implements Serializable{
         //used as local storage of the results, prior to being broadcast as an RDD
         List<Tuple2<Envelope, HashSet<Point>>> to_parallelize = new ArrayList<>();
 
+        int env_count = 0;
+
         //for every envelope in our rectangleRDD...
         for (Object this_object : rectangle_set) {
+            env_count++;
+            //FileUtils.writeStringToFile(file, ("on env: " + String.valueOf(env_count)), "UTF-8");
+
             Envelope this_envelope = Envelope.class.cast(this_object);
 
             //do a spatial range query on our points
